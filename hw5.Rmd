@@ -1,0 +1,71 @@
+---
+title: "HW5"
+author: "Danny Nguyen"
+date: "2023-11-10"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(rvest)
+library(dplyr)
+library(broom)
+```
+
+### Import Data
+```{r}
+homicide <- read_csv("homicide-data.csv")
+```
+This dataframe has `r nrow(homicide)` rows and `r ncol(homicide)` columns of criminal homicides across 50 major U.S. cities over a decade, detailing locations, arrest rates, and victim demographics, such as `reported_date`, `victim_race`, `victim_gender`, `disposition` etc. 
+
+```{r}
+homicide <- homicide %>% 
+  mutate(city_state = paste(city, state, sep =", ")) 
+
+unresolved = homicide %>% 
+  group_by(city_state) %>% 
+  summarize( 
+    total_homicide = n(),
+    unsolved = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))) %>%
+  filter(city_state != "Tulsa, AL")
+
+unresolved
+```
+
+### Baltimore Unresolved Homicides
+```{r}
+baltimore <- unresolved %>% 
+  filter(city_state == "Baltimore, MD")
+
+baltimore_test <- prop.test(
+  x= baltimore %>% pull(unsolved),
+  n = baltimore %>%pull(total_homicide))%>% 
+  broom::tidy()
+
+baltimore_test
+```
+The estimated proportion of homicides in Baltimore, MD is 64.6% and its 95%CI interval is (62.8%, 66.3%).
+
+### Plot: The Estimates and CIs for Each City
+```{r}
+prop_cities = unresolved %>% 
+  mutate(
+    test = map2(.x = unsolved, .y = total_homicide, ~prop.test(x = .x, n = .y)),
+    test = map(test,broom::tidy))%>%
+  unnest() %>%
+  select(city_state, estimate, conf.low, conf.high)%>%
+  arrange(desc(estimate))
+
+prop_cities %>%
+  ggplot(aes(x=reorder(city_state, estimate), y= estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+   labs(title = "Estimates and 95%CIs for each city",x = "City", y = "Proportion of unsolved homicides") +   
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
