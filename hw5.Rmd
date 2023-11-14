@@ -13,9 +13,10 @@ library(tidyverse)
 library(readr)
 library(rvest)
 library(dplyr)
-library(broom)
+library(patchwork)
 ```
 
+# Question 1
 ### Import Data
 ```{r}
 homicide <- read_csv("homicide-data.csv")
@@ -67,5 +68,149 @@ prop_cities %>%
    labs(title = "Estimates and 95%CIs for each city",x = "City", y = "Proportion of unsolved homicides") +   
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
+
+# Question 2
+
+### Import data list
+```{r}
+df <- 
+  tibble(list.files("./hw5_data/data")) %>%
+  mutate(file_list = paste(list.files("./hw5_data/data/")))
+
+read_files <- function(x) {
+  
+    data = read_csv(paste0("./hw5_data/data/", x)) %>%
+      mutate(file_names = x)
+}
+
+longitudinal_data <- map_df(df$file_list, read_files)
+
+longitudinal_data
+```
+
+### Tidy dataset
+```{r}
+tidy <- longitudinal_data %>%
+  janitor::clean_names() %>%
+  mutate(
+    file_names = str_replace(file_names, ".csv", ""),
+    group = str_sub(file_names, 1, 3)) %>% 
+  pivot_longer(
+    week_1:week_8,
+    names_to = "week",
+    values_to = "obs",
+    names_prefix = "week_") %>% 
+  mutate(week = as.numeric(week)) %>% 
+  mutate(subject = as.integer(str_extract(file_names, "[0-9][0-9]"))) %>%
+  select(group, subject, week, obs)
+
+tidy
+```
+
+### Spaghetti Plot
+```{r}
+tidy %>% 
+  ggplot(aes(x = week, y = obs, color = as.factor(subject))) +
+  geom_point(size=0.2) +
+  geom_line(aes(group = subject), alpha=0.5) +
+  facet_grid(~group) +
+  labs(x = "Week", y = "Observation", col = "Subject ID")
+```
+
+This plot suggests contrast effects between the control and experimental groups: there is no clear trend in the control group as they are highly varied in observation value. Meanwhile, among the experimental group, there is general upward trend in observation values in a roughly linear manner, implying a postive effect on the subjects of experimental conditions.
+
+# Question 3
+```{r}
+n <- 30
+sigma <- 5
+alpha <- 0.05
+mus <- c(0, 1, 2, 3, 4, 5, 6)
+set.seed(123456)
+
+stat_test = function(n, mu, sigma) {
+  
+  sim_data = tibble(
+    x = rnorm(n, mean = mu, sd = sigma),
+  )
+  
+  sim_data |> 
+    summarize(
+      mu_hat = mean(x),
+      sigma_hat = sd(x)
+    )
+}
+
+t_test <- function(n, mu, sigma) {
+  sample <- rnorm(n, mean = mu, sd = sigma)
+  test_result <- t.test(sample, mu = 0)
+  broom::tidy(test_result)
+}
+
+
+results <- tibble(mu = numeric(), mu_hat = numeric(), p_value = numeric(), reject = logical())
+
+
+for (mu in mus) {
+  for (i in 1:5000) {
+    sim_results <- stat_test(n, mu, sigma)
+    t_test_results <- t_test(n, mu, sigma)
+    results <- results %>% 
+      add_row(mu = mu, 
+              mu_hat = sim_results$mu_hat, 
+              p_value = t_test_results$p.value)
+  }
+}
+```
+
+```{r} 
+power = results %>% 
+  group_by(mu) %>%
+  summarize(total_number = n(),rejected_number = sum(p_value < 0.05)) %>% 
+  mutate(power = rejected_number / total_number)
+            
+power%>%
+  ggplot(aes(x=mu, y=power)) + 
+  geom_point() + 
+  geom_line() + 
+  labs (title = "Power vs. True Mean", x= 
+          "True Mean (mu)", y = "Power")
+```
+The graph shows a positive association between effect size and power: when the true mean is increased, the power of the test increases too (or the proportion of times that null is rejected increases). Thus, we can say that the larger the mu, the higher likelihood we can correctly reject the null.
+
+```{r}
+plot1 =  results %>% 
+  group_by(mu) %>%
+  summarize(mean_mu_hat=mean(mu_hat))%>% 
+  ggplot(aes(x = mu, y = mean_mu_hat)) + 
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "True mu Value",
+    y = "Average estimate of mu",
+    title = "Total datasets"
+  ) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot2 = results %>% 
+  filter(p_value < 0.05) %>% 
+  group_by(mu) %>%
+  summarize(
+    avg_muhat = mean(mu_hat)
+  ) %>% 
+  ggplot(aes(x = mu, y = avg_muhat)) + 
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "True mu Value",
+    y = "Average estimate of mu",
+    title = "Total rejected datasets"
+  ) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot1 + plot2
+
+```
+
+The plot indicates that mu_hat (sample mean) in tests where the null hypothesis is rejected closely equal to mu (the true population mean). This means that t-test is an unbiased estimator of the population mean when the null is rejected, under assumptions.
 
 
